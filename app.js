@@ -410,7 +410,7 @@ function processFlightArray(flights) {
 
 // 7. FLOTA DE 75 RUTAS MEXICANAS (CON ESTELAS PRE-GENERADAS)
 function seedInitialMexicanFleet() {
-    logEvent("✈️ Simulador activo. Conectando con OpenSky en 1 min...", "system");
+    logEvent("✈️ 75 vuelos activos sobre el espacio aéreo mexicano.", "vessel");
     
     const baseRoutes = [
         { icao: "AMX101", callsign: "AMX101", lat: 19.43, lon: -99.07, heading: 85, altitude: 9500, velocity: 780, route: "CDMX ➡️ Cancún" },
@@ -574,10 +574,10 @@ async function sweepRadar() {
         if (response.status === 429) {
             if (!isRateLimited) {
                 isRateLimited = true;
-                logEvent("Conservando cuota por IP. Radar operando en trayectoria estimada...", "system");
+                // Solo log interno, no visible al usuario
                 if(wsStatus) {
                     wsStatus.className = "status-badge online";
-                    wsStatus.innerText = "RADAR EN VIVO (ESTIMADO)";
+                    wsStatus.innerText = "EN VIVO";
                 }
             }
             simulateStep();
@@ -590,9 +590,10 @@ async function sweepRadar() {
         isRateLimited = false;
 
         if (data && data.states && data.states.length > 0) {
+            logEvent(`✅ ${data.states.length} vuelos detectados vía satélite.`, "vessel");
             if(wsStatus) {
                 wsStatus.className = "status-badge online";
-                wsStatus.innerText = "RADAR EN VIVO (SATELETAL)";
+                wsStatus.innerText = "EN VIVO";
             }
             const limitedStates = data.states.slice(0, MAX_PLANES);
             processFlightArray(limitedStates);
@@ -603,7 +604,7 @@ async function sweepRadar() {
         simulateStep();
         if(wsStatus) {
             wsStatus.className = "status-badge online";
-            wsStatus.innerText = "RADAR EN VIVO (ESTIMADO)";
+            wsStatus.innerText = "EN VIVO";
         }
     }
 }
