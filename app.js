@@ -1,6 +1,8 @@
-// 1. CONFIGURACIÓN DEL RADAR Y SIMULADOR EN VIVO
-const API_URL = "/api/states/all?lamin=15.5&lomin=-114&lamax=30&lomax=-86";
+// 1. CONFIGURACIÓN DEL RADAR Y SIMULADOR
+// URL directa HTTPS para móviles, GitHub Pages y cualquier dispositivo sin servidor proxy
+const OPENSKY_DIRECT_URL = "https://opensky-network.org/api/states/all?lamin=15.5&lomin=-114&lamax=30&lomax=-86";
 const MAX_PLANES = 75;
+const POLL_INTERVAL_MS = 60000; // Solo 1 petición por minuto para cuidar la cuota por IP
 
 // 2. INICIALIZACIÓN DEL MAPA
 const map = L.map('map', { 
@@ -20,6 +22,7 @@ let simulationInterval = null;
 
 const selectedAircraftForAudio = new Set();
 let isOrchestraMode = true;
+let isRateLimited = false;
 
 const kpiCount = document.getElementById('kpi-count');
 const kpiSpeed = document.getElementById('kpi-speed');
@@ -72,18 +75,17 @@ if (toggleOrchestraBtn) {
     });
 }
 
-// 4. MOTOR DE SONIDO "CAMPANAS ZEN CRISTALINAS" (AUTO-ACTIVABLE AL PRIMER CLIC)
+// 4. MOTOR DE SONIDO "CAMPANAS ZEN CRISTALINAS"
 class ZenBellAudioEngine {
     constructor() {
         this.active = false;
         this.ctx = null;
         this.masterGain = null;
         
-        // Escala Pentatónica Mayor de Do Dulce y Cristalina (C4 a C6)
         this.scale = [
-            261.63, 293.66, 329.63, 392.00, 440.00, // C4, D4, E4, G4, A4
-            523.25, 587.33, 659.25, 783.99, 880.00, // C5, D5, E5, G5, A5
-            1046.50                                  // C6
+            261.63, 293.66, 329.63, 392.00, 440.00, 
+            523.25, 587.33, 659.25, 783.99, 880.00, 
+            1046.50                                  
         ];
     }
 
@@ -174,7 +176,7 @@ class ZenBellAudioEngine {
         
         const actualFreq = onGround ? freq / 2 : freq;
         oscMain.frequency.value = actualFreq;
-        oscHarmonic.frequency.value = actualFreq * 1.5; // Quinta justa armónica para sonido celestial
+        oscHarmonic.frequency.value = actualFreq * 1.5; 
 
         panner.pan.value = pan;
         
@@ -205,19 +207,9 @@ class ZenBellAudioEngine {
 
 const audioEngine = new ZenBellAudioEngine();
 
-// Auto-activación de audio al primer clic en cualquier parte de la pantalla (supera política de autoplay del navegador)
-const enableAudioOnFirstClick = () => {
-    if (!audioEngine.active) {
-        audioEngine.init();
-        logEvent("Sistema de sonido activado automáticamente.", "system");
-    }
-    document.removeEventListener('click', enableAudioOnFirstClick);
-};
-document.addEventListener('click', enableAudioOnFirstClick);
-
+// El audio se activa desde el Modal, no desde un clic genérico
 if (toggleAudioBtn) {
-    toggleAudioBtn.addEventListener('click', (e) => {
-        e.stopPropagation(); // Evita doble activación
+    toggleAudioBtn.addEventListener('click', () => {
         audioEngine.toggle();
     });
 }
@@ -363,18 +355,25 @@ function processFlightArray(flights) {
             markers.set(icao, marker);
         }
 
-        // Estela Punteada Delgada Visible
+        // Estelas: línea delgada punteada que crece conforme el avión avanza
         const trailColor = isSelected ? '#fbbf24' : (onGround ? '#ef4444' : '#38bdf8');
+        const trailOpacity = isSelected ? 0.95 : 0.75;
+        const trailWeight  = isSelected ? 2 : 1.5;
         if (history.length > 1) {
             if (trails.has(icao)) {
                 trails.get(icao).setLatLngs(history);
-                trails.get(icao).setStyle({ color: trailColor, opacity: 0.85, weight: 1.5, dashArray: '3, 6' });
+                trails.get(icao).setStyle({
+                    color: trailColor,
+                    opacity: trailOpacity,
+                    weight: trailWeight,
+                    dashArray: '3, 7'
+                });
             } else {
                 const polyline = L.polyline(history, {
                     color: trailColor,
-                    weight: 1.5,
-                    opacity: 0.85,
-                    dashArray: '3, 6'
+                    weight: trailWeight,
+                    opacity: trailOpacity,
+                    dashArray: '3, 7'
                 }).addTo(map);
                 trails.set(icao, polyline);
             }
@@ -399,9 +398,9 @@ function processFlightArray(flights) {
     updateAvgSpeed();
 }
 
-// 7. GENERADOR DE 75 RUTAS EN MÉXICO (SIMULADOR DE ALTA PRECISIÓN PARA GITHUB PAGES)
+// 7. FLOTA DE 75 RUTAS MEXICANAS
 function seedInitialMexicanFleet() {
-    logEvent("Iniciando Simulador Aéreo en Vivo (75 Vuelos por México)...", "system");
+    logEvent("Desplegando flota interactiva en espacio aéreo mexicano...", "system");
     
     const baseRoutes = [
         { icao: "AMX101", callsign: "AMX101", lat: 19.43, lon: -99.07, heading: 85, altitude: 9500, velocity: 780, route: "CDMX ➡️ Cancún" },
@@ -454,7 +453,6 @@ function seedInitialMexicanFleet() {
         { icao: "VOI789", callsign: "VOI789", lat: 19.15, lon: -104.32, heading: 75, altitude: 8800, velocity: 740, route: "Manzanillo ➡️ CDMX" },
         { icao: "VTI234", callsign: "VTI234", lat: 16.84, lon: -99.82, heading: 35, altitude: 6300, velocity: 580, route: "Ixtapa ➡️ CDMX" },
         { icao: "AMX567", callsign: "AMX567", lat: 15.76, lon: -96.26, heading: 25, altitude: 8100, velocity: 710, route: "Puerto Escondido ➡️ CDMX" },
-        // Rutas Internacionales que Cruzan el Espacio Aéreo Mexicano (25 Vuelos extra)
         { icao: "AAL102", callsign: "AAL102", lat: 21.00, lon: -101.00, heading: 150, altitude: 11500, velocity: 910, route: "Dallas ➡️ CDMX" },
         { icao: "UAL440", callsign: "UAL440", lat: 26.50, lon: -99.50, heading: 180, altitude: 11800, velocity: 930, route: "Houston ➡️ Cancún" },
         { icao: "DAL882", callsign: "DAL882", lat: 28.00, lon: -112.00, heading: 130, altitude: 11200, velocity: 890, route: "Los Ángeles ➡️ Los Cabos" },
@@ -479,7 +477,7 @@ function seedInitialMexicanFleet() {
         { icao: "AMX402", callsign: "AMX402", lat: 30.50, lon: -113.50, heading: 325, altitude: 11200, velocity: 900, route: "CDMX ➡️ Seattle" },
         { icao: "VOI811", callsign: "VOI811", lat: 24.20, lon: -102.00, heading: 350, altitude: 10500, velocity: 860, route: "Morelia ➡️ Chicago" },
         { icao: "VTI332", callsign: "VTI332", lat: 21.50, lon: -102.50, heading: 15, altitude: 9900, velocity: 810, route: "Aguascalientes ➡️ Dallas" },
-        { icao: "AMX698", callsign: "AMX698", lat: 18.20, lon: -95.50, heading: 125, altitude: 10800, velocity: 870, route: "CDMX ➡️ San José Costa Rica" }
+        { icao: "AMX698", callsign: "AMX698", lat: 18.20, lon: -95.50, heading: 125, altitude: 10800, velocity: 870, route: "CDMX ➡️ Costa Rica" }
     ];
 
     const flightsArray = baseRoutes.map(r => [
@@ -490,7 +488,7 @@ function seedInitialMexicanFleet() {
     processFlightArray(flightsArray);
 }
 
-// 8. SIMULACIÓN DE AVANCE SUAVE
+// 8. SIMULACIÓN DE AVANCE SUAVE ENTRE RECALCULOS
 function simulateStep() {
     if (aircraftData.size === 0) {
         seedInitialMexicanFleet();
@@ -500,7 +498,7 @@ function simulateStep() {
     aircraftData.forEach((data, icao) => {
         if (data.onGround || !data.velocity || !data.heading) return;
 
-        const distanceKm = (data.velocity / 3600) * 2;
+        const distanceKm = (data.velocity / 3600) * 2; // Avance en 2s
         const rad = (data.heading * Math.PI) / 180;
         const dLat = (distanceKm / 111.32) * Math.cos(rad);
         const dLon = (distanceKm / (111.32 * Math.cos((data.lat * Math.PI) / 180))) * Math.sin(rad);
@@ -523,18 +521,18 @@ function simulateStep() {
     });
 }
 
-// 9. BARRIDO DE RADAR INTELIGENTE
+// 9. BARRIDO DE RADAR INTELIGENTE (RECALCULAR CADA 1 MINUTO PARA CUIDAR LA IP)
 async function sweepRadar() {
     try {
-        const response = await fetch(API_URL);
+        const response = await fetch(OPENSKY_DIRECT_URL);
         
         if (response.status === 429) {
             if (!isRateLimited) {
                 isRateLimited = true;
-                logEvent("Radar operando en modo simulador de alta precisión en vivo.", "system");
+                logEvent("Conservando cuota por IP. Radar operando en trayectoria estimada...", "system");
                 if(wsStatus) {
                     wsStatus.className = "status-badge online";
-                    wsStatus.innerText = "RADAR EN VIVO (75 VUELOS)";
+                    wsStatus.innerText = "RADAR EN VIVO (ESTIMADO)";
                 }
             }
             simulateStep();
@@ -549,7 +547,7 @@ async function sweepRadar() {
         if (data && data.states && data.states.length > 0) {
             if(wsStatus) {
                 wsStatus.className = "status-badge online";
-                wsStatus.innerText = "RADAR EN VIVO";
+                wsStatus.innerText = "RADAR EN VIVO (SATELETAL)";
             }
             const limitedStates = data.states.slice(0, MAX_PLANES);
             processFlightArray(limitedStates);
@@ -560,7 +558,7 @@ async function sweepRadar() {
         simulateStep();
         if(wsStatus) {
             wsStatus.className = "status-badge online";
-            wsStatus.innerText = "RADAR EN VIVO (75 VUELOS)";
+            wsStatus.innerText = "RADAR EN VIVO (ESTIMADO)";
         }
     }
 }
@@ -594,7 +592,26 @@ setTimeout(() => {
     seedInitialMexicanFleet();
     sweepRadar(); 
     
-    sweepInterval = setInterval(sweepRadar, 15000);
+    sweepInterval = setInterval(sweepRadar, POLL_INTERVAL_MS);
     simulationInterval = setInterval(simulateStep, 2000);
-    audioSweepInterval = setInterval(sonifyNextAircraft, 1000); 
+    audioSweepInterval = setInterval(sonifyNextAircraft, 1200);
+
+    // Modal de bienvenida: conectar los botones al motor de audio (que ya existe)
+    const audioModal = document.getElementById('audio-modal');
+    const modalEnableBtn = document.getElementById('modal-enable-sound');
+    const modalSkipBtn   = document.getElementById('modal-skip-sound');
+
+    if (modalEnableBtn) {
+        modalEnableBtn.addEventListener('click', () => {
+            audioModal.classList.add('hidden');
+            audioEngine.init();
+            logEvent('Sistema de sonido activado. ¡Bienvenido!', 'vessel');
+        });
+    }
+    if (modalSkipBtn) {
+        modalSkipBtn.addEventListener('click', () => {
+            audioModal.classList.add('hidden');
+            logEvent('Modo silencioso activado. Toca el botón 🔊 para activar el audio.', 'system');
+        });
+    }
 }, 500);
