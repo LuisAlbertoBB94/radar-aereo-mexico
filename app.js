@@ -8,8 +8,14 @@ const POLL_INTERVAL_MS = 60000; // 1 petición por minuto
 
 // 2. INICIALIZACIÓN DEL MAPA
 const map = L.map('map', { 
-    zoomControl: true, 
-    attributionControl: false 
+    zoomControl: true,
+    attributionControl: false,
+    tap: false,          // Evita que Leaflet capture taps y bloquee el drag de un dedo en móvil
+    tapTolerance: 20,
+    dragging: true,
+    touchZoom: true,
+    scrollWheelZoom: true,
+    doubleClickZoom: true
 }).setView([23.6345, -102.5528], 5); // Centro de México
 
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
@@ -357,10 +363,10 @@ function processFlightArray(flights) {
             markers.set(icao, marker);
         }
 
-        // Estelas: línea delgada punteada que crece conforme el avión avanza
-        const trailColor = isSelected ? '#fbbf24' : (onGround ? '#ef4444' : '#38bdf8');
-        const trailOpacity = isSelected ? 0.95 : 0.75;
-        const trailWeight  = isSelected ? 2 : 1.5;
+        // Estelas: desvanecidas, delgadas, con smoothFactor para curva suave
+        const trailColor = isSelected ? '#fbbf24' : '#38bdf8';
+        const trailOpacity = isSelected ? 0.55 : 0.28;
+        const trailWeight  = isSelected ? 1.5 : 0.9;
         if (history.length > 1) {
             if (trails.has(icao)) {
                 trails.get(icao).setLatLngs(history);
@@ -368,14 +374,16 @@ function processFlightArray(flights) {
                     color: trailColor,
                     opacity: trailOpacity,
                     weight: trailWeight,
-                    dashArray: '3, 7'
+                    dashArray: '4, 9',
+                    smoothFactor: 2.5   // Suaviza los ángulos entre puntos
                 });
             } else {
                 const polyline = L.polyline(history, {
                     color: trailColor,
                     weight: trailWeight,
                     opacity: trailOpacity,
-                    dashArray: '3, 7'
+                    dashArray: '4, 9',
+                    smoothFactor: 2.5
                 }).addTo(map);
                 trails.set(icao, polyline);
             }
@@ -531,7 +539,11 @@ function simulateStep() {
     aircraftData.forEach((data, icao) => {
         if (data.onGround || !data.velocity || !data.heading) return;
 
-        const distanceKm = (data.velocity / 3600) * 2; // Avance en 2s
+        // Drift orgánico: varia el heading ±1.5° por paso → trayectoria curva y natural
+        const drift = (Math.random() - 0.5) * 3.0;
+        data.heading = (data.heading + drift + 360) % 360;
+
+        const distanceKm = (data.velocity / 3600) * 2; // km en 2s
         const rad = (data.heading * Math.PI) / 180;
         const dLat = (distanceKm / 111.32) * Math.cos(rad);
         const dLon = (distanceKm / (111.32 * Math.cos((data.lat * Math.PI) / 180))) * Math.sin(rad);
@@ -540,13 +552,13 @@ function simulateStep() {
         data.lon += dLon;
 
         data.history.push([data.lat, data.lon]);
-        if (data.history.length > 30) data.history.shift();
-
-        const isSelected = selectedAircraftForAudio.has(icao);
+        if (data.history.length > 50) data.history.shift(); // Más historial = curvas más largas
 
         if (markers.has(icao)) {
-            const marker = markers.get(icao);
-            marker.setLatLng([data.lat, data.lon]);
+            markers.get(icao).setLatLng([data.lat, data.lon]);
+            // Actualizar ícono con nuevo heading
+            const isSelected = selectedAircraftForAudio.has(icao);
+            markers.get(icao).setIcon(createAirplaneIcon(data.heading, data.onGround, isSelected));
         }
         if (trails.has(icao) && data.history.length > 1) {
             trails.get(icao).setLatLngs(data.history);
