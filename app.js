@@ -1,8 +1,10 @@
 // 1. CONFIGURACIÓN DEL RADAR Y SIMULADOR
-// URL directa HTTPS para móviles, GitHub Pages y cualquier dispositivo sin servidor proxy
-const OPENSKY_DIRECT_URL = "https://opensky-network.org/api/states/all?lamin=15.5&lomin=-114&lamax=30&lomax=-86";
+// Usamos corsproxy.io como puente CORS para que el navegador (móvil, GitHub Pages, etc.) pueda
+// acceder a la API de OpenSky sin bloqueos. 1 petición por minuto para cuidar la cuota por IP.
+const OPENSKY_BASE = "https://opensky-network.org/api/states/all?lamin=15.5&lomin=-114&lamax=30&lomax=-86";
+const OPENSKY_DIRECT_URL = `https://corsproxy.io/?${encodeURIComponent(OPENSKY_BASE)}`;
 const MAX_PLANES = 75;
-const POLL_INTERVAL_MS = 60000; // Solo 1 petición por minuto para cuidar la cuota por IP
+const POLL_INTERVAL_MS = 60000; // 1 petición por minuto
 
 // 2. INICIALIZACIÓN DEL MAPA
 const map = L.map('map', { 
@@ -398,9 +400,9 @@ function processFlightArray(flights) {
     updateAvgSpeed();
 }
 
-// 7. FLOTA DE 75 RUTAS MEXICANAS
+// 7. FLOTA DE 75 RUTAS MEXICANAS (CON ESTELAS PRE-GENERADAS)
 function seedInitialMexicanFleet() {
-    logEvent("Desplegando flota interactiva en espacio aéreo mexicano...", "system");
+    logEvent("✈️ Simulador activo. Conectando con OpenSky en 1 min...", "system");
     
     const baseRoutes = [
         { icao: "AMX101", callsign: "AMX101", lat: 19.43, lon: -99.07, heading: 85, altitude: 9500, velocity: 780, route: "CDMX ➡️ Cancún" },
@@ -480,13 +482,44 @@ function seedInitialMexicanFleet() {
         { icao: "AMX698", callsign: "AMX698", lat: 18.20, lon: -95.50, heading: 125, altitude: 10800, velocity: 870, route: "CDMX ➡️ Costa Rica" }
     ];
 
-    const flightsArray = baseRoutes.map(r => [
-        r.icao, r.callsign, "Mexico", 1786589314, 1786589315,
-        r.lon, r.lat, r.altitude, false, r.velocity / 3.6, r.heading, r.route
-    ]);
+    // Pre-generar historial de estelas hacia atrás para que aparezcan desde el inicio
+    const flightsArray = baseRoutes.map(r => {
+        const rad = (r.heading * Math.PI) / 180;
+        const speedKmh = r.velocity;
+        // Calcular posición previa de hace 5 y 10 minutos
+        const distBack5 = (speedKmh / 60) * 5;
+        const distBack10 = (speedKmh / 60) * 10;
+        const dLat5  = (distBack5  / 111.32) * Math.cos(rad);
+        const dLon5  = (distBack5  / (111.32 * Math.cos((r.lat * Math.PI) / 180))) * Math.sin(rad);
+        const dLat10 = (distBack10 / 111.32) * Math.cos(rad);
+        const dLon10 = (distBack10 / (111.32 * Math.cos((r.lat * Math.PI) / 180))) * Math.sin(rad);
+
+        // Inyectar historial pre-calculado directamente en aircraftData
+        const prevHistory = [
+            [r.lat - dLat10, r.lon - dLon10],
+            [r.lat - dLat5,  r.lon - dLon5],
+            [r.lat,           r.lon]
+        ];
+
+        const flightEntry = [
+            r.icao, r.callsign, "Mexico", Date.now() / 1000, Date.now() / 1000,
+            r.lon, r.lat, r.altitude, false, r.velocity / 3.6, r.heading, r.route
+        ];
+
+        // Pre-poblar aircraftData con el historial antes de procesar
+        aircraftData.set(r.icao, {
+            icao: r.icao, callsign: r.callsign, originCountry: "Mexico",
+            lat: r.lat, lon: r.lon, altitude: r.altitude,
+            onGround: false, velocity: r.velocity, heading: r.heading,
+            route: r.route, history: prevHistory
+        });
+
+        return flightEntry;
+    });
 
     processFlightArray(flightsArray);
 }
+
 
 // 8. SIMULACIÓN DE AVANCE SUAVE ENTRE RECALCULOS
 function simulateStep() {
